@@ -1,33 +1,34 @@
-# How to contribute
+# 贡献指南
 
-We'd love to accept your patches and contributions to this project.
+欢迎参与本项目的贡献！这是一个完全开源、免费的项目，致力于为国内开发者提供更好用的视觉智能体工具。
 
-## Before you begin
+## 如何贡献
 
-### Sign our Contributor License Agreement
+我们非常欢迎任何形式的贡献，包括但不限于：
 
-Contributions to this project must be accompanied by a
-[Contributor License Agreement](https://cla.developers.google.com/about) (CLA).
-You (or your employer) retain the copyright to your contribution; this simply
-gives us permission to use and redistribute your contributions as part of the
-project.
+- 提交 Bug 反馈或新功能建议（Issue）。
+- 提交代码改进或新特性（Pull Request）。
+- 完善文档或翻译。
 
-If you or your current employer have already signed the Google CLA (even if it
-was for a different project), you probably don't need to do it again.
+### 提交代码 (Pull Request)
 
-Visit <https://cla.developers.google.com/> to see your current agreements or to
-sign a new one.
+1. **Fork 本仓库**：点击右上角的 "Fork" 按钮，将项目复制到你的 GitHub 账户。
+2. **创建分支**：在你的仓库中创建一个新分支，例如 `git checkout -b feature/my-new-feature`。
+3. **提交更改**：编写代码并提交，`git commit -m "Add some feature"`。
+4. **推送到远程**：将分支推送到你的 GitHub 仓库，`git push origin feature/my-new-feature`。
+5. **发起 PR**：回到本仓库页面，点击 "New Pull Request" 提交你的更改。
 
-### Review our community guidelines
+我们会尽快 Review 你的代码并合并！
 
-This project follows
-[Google's Open Source Community Guidelines](https://opensource.google/conduct/).
+## 开发规范
 
-## Contribution process
+- 请保持代码风格与现有代码一致。
+- 如果引入了新的依赖，请记得更新 `requirements.txt`。
+- 对于重大更改，建议先提交 Issue 讨论。
 
-### Code reviews
+## 许可证
 
-All submissions, including submissions by project members, require review. We
-use GitHub pull requests for this purpose. Consult
-[GitHub Help](https://help.github.com/articles/about-pull-requests/) for more
-information on using pull requests.
+贡献的代码将遵循本项目的 [Apache License 2.0](LICENSE) 协议。
+这意味着你的贡献也将是开源和免费的。
+
+再次感谢你的支持！

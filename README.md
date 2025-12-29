@@ -1,19 +1,32 @@
-# Computer Use Preview
+# Computer Use (Qwen-VL 适配版)
 
-## Quick Start
+本项目完全开源免费，旨在帮助国内开发者更便捷地体验和研究基于视觉大模型的浏览器自动化技术，尤其致力于**浏览器自动化** **辅助web自动化测试**，探索 AI 驱动的新一代测试方案。
 
-This section will guide you through setting up and running the Computer Use Preview model, either the Gemini Developer API or Vertex AI. Follow these steps to get started.
+## ✨ 主要特性
 
-### 1. Installation
+- **国内模型适配**：深度适配阿里云 Qwen-VL-Max 模型，解决国内访问 Gemini 困难的问题。
+- **中文环境优化**：
+    - 默认搜索引擎调整为百度。
+    - 优化了 System Prompt，使其更懂中文指令。
+    - 修复了浏览器默认页面的加载问题。
+- **智能体增强**：
+    - 增加了“任务完成”检测机制，自动判断任务结束并移交人类接管。
+    - 实现了对纯文本回复的 Fallback 解析，提升模型指令执行的稳定性。
+- **演示友好**：以我个人为例，我利用 `juyufeng.py` 脚本，支持隐藏 API Key 进行安全演示。
 
-**Clone the Repository**
+
+## 🚀 快速开始
+
+### 1. 安装
+
+**克隆仓库**
 
 ```bash
-git clone https://github.com/google/computer-use-preview.git
-cd computer-use-preview
+git clone https://github.com/your-username/computer-use-qwen.git
+cd computer-use-qwen
 ```
 
-**Set up Python Virtual Environment and Install Dependencies**
+**配置 Python 环境并安装依赖**
 
 ```bash
 python3 -m venv .venv
@@ -21,143 +34,64 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Install Playwright and Browser Dependencies**
+**安装 Playwright 浏览器**
 
 ```bash
-# Install system dependencies required by Playwright for Chrome
-playwright install-deps chrome
-
-# Install the Chrome browser for Playwright
-playwright install chrome
+# 安装 Playwright 及其依赖
+playwright install
 ```
 
-### 2. Configuration
-You can get started using either the Gemini Developer API or Vertex AI.
+### 2. 配置
 
-#### A. If using the Gemini Developer API:
+你需要一个阿里云百炼的 API Key (DashScope)。
 
-You need a Gemini API key to use the agent:
+**设置环境变量 (推荐)**
 
 ```bash
-export API_KEY="YOUR_API_KEY"
+export DASHSCOPE_API_KEY="你的_DASHSCOPE_API_KEY"
 ```
 
-Or to add this to your virtual environment:
+或者在运行命令时通过 `--api_key` 参数传入。
+
+### 3. 运行
+
+**交互式演示 (推荐)**
+
+我们提供了一个方便的演示脚本，支持隐藏 Key 并在终端交互式输入指令：
 
 ```bash
-echo 'export API_KEY="YOUR_API_KEY"' >> .venv/bin/activate
-# After editing, you'll need to deactivate and reactivate your virtual
-# environment if it's already active:
-deactivate
-source .venv/bin/activate
+python juyufeng.py "打开B站搜索黑神话悟空"
 ```
 
-Replace `YOUR_API_KEY` with your actual key.
+**命令行运行**
 
-#### B. If using the Vertex AI Client:
-
-You need to explicitly use Vertex AI, then provide project and location to use the agent:
+你也可以使用原始的 `main.py` 进行更细致的控制：
 
 ```bash
-export USE_VERTEXAI=true
-export VERTEXAI_PROJECT="YOUR_PROJECT_ID"
-export VERTEXAI_LOCATION="YOUR_LOCATION"
+# 使用 Qwen 模型
+python main.py --provider qwen --query "打开百度搜索xxx"
+
+# 如果没有设置环境变量，可以手动传入 Key
+python main.py --provider qwen --api_key "sk-..." --query "打开百度搜索xxx"
 ```
 
-Or to add this to your virtual environment:
+## 🛠️ 二次开发指南
 
-```bash
-echo 'export USE_VERTEXAI=true' >> .venv/bin/activate
-echo 'export VERTEXAI_PROJECT="your-project-id"' >> .venv/bin/activate
-echo 'export VERTEXAI_LOCATION="your-location"' >> .venv/bin/activate
-# After editing, you'll need to deactivate and reactivate your virtual
-# environment if it's already active:
-deactivate
-source .venv/bin/activate
-```
+本项目核心逻辑位于 `agent_qwen.py` (Qwen 智能体实现) 和 `main.py` (入口与参数处理)。
 
-Replace `YOUR_PROJECT_ID` and `YOUR_LOCATION` with your actual project and location.
+如果你想适配其他 OpenAI 兼容接口的模型，可以参考 `agent_qwen.py` 中的 `QwenAgent` 类实现。
 
-### 3. Running the Tool
+## 🫡 致敬与鸣谢
 
-The primary way to use the tool is via the `main.py` script.
+本项目基于 Google 的 [Computer Use Preview](https://github.com/google-gemini/computer-use-preview) 项目构建。感谢 Google 团队开源了如此优秀的浏览器自动化框架，为社区提供了宝贵的探索基础。
 
-**General Command Structure:**
+Original Project Copyright 2025 Google LLC. Licensed under the Apache License, Version 2.0.
 
-```bash
-python main.py --query "Go to Google and type 'Hello World' into the search bar"
-```
+## 📄 许可证
 
-**Available Environments:**
+本项目遵循 [Apache License 2.0](LICENSE) 协议。
+你可以免费使用、修改和分发本项目，但请保留原始版权声明和协议文件。
 
-You can specify a particular environment with the ```--env <environment>``` flag.  Available options:
+## 💬 交流与讨论
 
-- `playwright`: Runs the browser locally using Playwright.
-- `browserbase`: Connects to a Browserbase instance.
-
-**Local Playwright**
-
-Runs the agent using a Chrome browser instance controlled locally by Playwright.
-
-```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="playwright"
-```
-
-You can also specify an initial URL for the Playwright environment:
-
-```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="playwright" --initial_url="https://www.google.com/search?q=latest+AI+news"
-```
-
-**Browserbase**
-
-Runs the agent using Browserbase as the browser backend. Ensure the proper Browserbase environment variables are set:`BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`.
-
-```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="browserbase"
-```
-
-## Agent CLI
-
-The `main.py` script is the command-line interface (CLI) for running the browser agent.
-
-### Command-Line Arguments
-
-| Argument | Description | Required | Default | Supported Environment(s) |
-|-|-|-|-|-|
-| `--query` | The natural language query for the browser agent to execute. | Yes | N/A | All |
-| `--env` | The computer use environment to use. Must be one of the following: `playwright`, or `browserbase` | No | N/A | All |
-| `--initial_url` | The initial URL to load when the browser starts. | No | https://www.google.com | All |
-| `--highlight_mouse` | If specified, the agent will attempt to highlight the mouse cursor's position in the screenshots. This is useful for visual debugging. | No | False (not highlighted) | `playwright` |
-
-### Environment Variables
-
-| Variable | Description | Required |
-|-|-|-|
-| API_KEY | Your API key for the Gemini model. | Yes |
-| BROWSERBASE_API_KEY | Your API key for Browserbase. | Yes (when using the browserbase environment) |
-| BROWSERBASE_PROJECT_ID | Your Project ID for Browserbase. | Yes (when using the browserbase environment) |
-
-## Known Issues
-
-### Playwright Dropdown Menu
-
-On certain operating systems, the Playwright browser is unable to capture `<select>` elements because they are rendered by the operating system. As a result, the agent is unable to send the correct screenshot to the model.
-
-There are several ways to mitigate this.
-
-1. Use the Browserbase option instead of Playwright.
-2. Inject a script like [proxy-select](https://github.com/amitamb/proxy-select) to render a custom `<select>` element. You must inject `proxy-select.css` and `proxy-select.js` into each page that has a non-custom `<select>` element. You can do this in the [`Playwright.__enter__`](https://github.com/google-gemini/computer-use-preview/blob/main/computers/playwright/playwright.py#L100) method by adding a few lines of code, like the following (replacing `PROXY_SELECT_JS` and `PROXY_SELECT_CSS` with the appropriate variables):
-
-```python
-self._page.add_init_script(PROXY_SELECT_JS)
-def inject_style(page):
-    try:
-        page.add_style_tag(content=PROXY_SELECT_CSS)
-    except Exception as e:
-        print(f"Error injecting style: {e}")
-
-self._page.on('domcontentloaded', inject_style)
-```
-
-Note, option 2 does not work 100% of the time, but is a temporary workaround for certain websites. The better option is to use Browserbase.
+![一起讨论吧](一起讨论吧.jpg)
