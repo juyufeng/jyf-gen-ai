@@ -104,6 +104,9 @@ def main() -> int:
                 model_name=args.model,
             )
         agent.agent_loop()
+        
+        print("\nSession finished. The browser is still open for your review.")
+        input("Press Enter to close the browser and exit...")
     return 0
 
 
