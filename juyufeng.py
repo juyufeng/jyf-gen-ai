@@ -6,7 +6,7 @@ import os
 # 演示专用配置
 # 注意：演示过程中请勿打开此文件，以免泄露 Key
 # ==========================================
-API_KEY = "sk-...."
+API_KEY = "sk-"
 PROVIDER = "qwen"
 
 def run_demo():

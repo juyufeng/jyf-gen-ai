@@ -370,6 +370,109 @@ class PlaywrightComputer(Computer):
         self._page.wait_for_load_state()
         return self.current_state()
 
+    def get_visible_text(self) -> str:
+        try:
+            self._page.wait_for_load_state()
+            txt = self._page.evaluate("() => document.body ? document.body.innerText || '' : ''")
+            return txt or ""
+        except Exception:
+            return ""
+
+    def get_dom_summary(self) -> str:
+        try:
+            self._page.wait_for_load_state()
+            html = self._page.content()
+            return (html or "")[:10000]
+        except Exception:
+            return ""
+
+    def get_result_text(self) -> str:
+        try:
+            self._page.wait_for_load_state("networkidle")
+            candidates = ["#content_left", "#search", "#b_results", "[role='main']"]
+            for sel in candidates:
+                try:
+                    self._page.wait_for_selector(sel, timeout=5000)
+                    txt = self._page.locator(sel).inner_text()
+                    if txt and len(txt.strip()) > 0:
+                        return txt
+                except Exception:
+                    continue
+            # Fallback to visible text
+            return self.get_visible_text()
+        except Exception:
+            return ""
+
+    def get_search_items(self) -> list:
+        try:
+            self._page.wait_for_load_state("networkidle")
+            js = """
+            () => {
+                function collectFromBaidu() {
+                    const root = document.querySelector('#content_left');
+                    if (!root) return [];
+                    const nodes = root.querySelectorAll('h3 a');
+                    const items = [];
+                    nodes.forEach(a => {
+                        const title = (a.textContent || '').trim();
+                        const url = a.href || '';
+                        let snippet = '';
+                        const res = a.closest('.result') || a.closest('div');
+                        if (res) {
+                            const abs = res.querySelector('.c-abstract, .c-span-last, p');
+                            if (abs) snippet = (abs.textContent || '').trim();
+                        }
+                        if (title && url) items.push({ title, url, snippet });
+                    });
+                    return items;
+                }
+                function collectFromGoogle() {
+                    const root = document.querySelector('#search');
+                    if (!root) return [];
+                    const nodes = root.querySelectorAll('a h3');
+                    const items = [];
+                    nodes.forEach(h3 => {
+                        const a = h3.closest('a');
+                        if (!a) return;
+                        const title = (h3.textContent || '').trim();
+                        const url = a.href || '';
+                        let snippet = '';
+                        const res = a.closest('div')?.parentElement;
+                        if (res) {
+                            const abs = res.querySelector('span, div');
+                            if (abs) snippet = (abs.textContent || '').trim();
+                        }
+                        if (title && url) items.push({ title, url, snippet });
+                    });
+                    return items;
+                }
+                function collectFromBing() {
+                    const root = document.querySelector('#b_results');
+                    if (!root) return [];
+                    const nodes = root.querySelectorAll('.b_algo h2 a');
+                    const items = [];
+                    nodes.forEach(a => {
+                        const title = (a.textContent || '').trim();
+                        const url = a.href || '';
+                        let snippet = '';
+                        const res = a.closest('.b_algo');
+                        if (res) {
+                            const p = res.querySelector('p');
+                            if (p) snippet = (p.textContent || '').trim();
+                        }
+                        if (title && url) items.push({ title, url, snippet });
+                    });
+                    return items;
+                }
+                let items = collectFromBaidu();
+                if (!items || items.length === 0) items = collectFromGoogle();
+                if (!items || items.length === 0) items = collectFromBing();
+                return items.slice(0, 20);
+            }
+            """
+            return self._page.evaluate(js) or []
+        except Exception:
+            return []
     def current_state(self) -> EnvState:
         self._page.wait_for_load_state()
         # Even if Playwright reports the page as loaded, it may not be so.

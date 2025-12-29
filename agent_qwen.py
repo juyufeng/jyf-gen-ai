@@ -3,6 +3,9 @@ import time
 import base64
 import json
 import hashlib
+import sys
+import platform
+import subprocess
 from typing import Literal, Optional, Union, Any, List, Dict
 from openai import OpenAI
 from app_logging.context_logger import ContextLogger
@@ -299,6 +302,7 @@ class QwenAgent:
         self._last_screenshot_hash = ""
         self._last_dom_digest = ""
         self._failed_attempts = 0
+        self._export_done = False
         
         self._consecutive_text_responses = 0
 
@@ -566,13 +570,10 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                 else:
                     self._failed_attempts = 0
                 if self._failed_attempts >= 2 and not self._code_model_used and self._should_use_code_model():
-                    try:
-                        self._invoke_code_model()
-                        self._code_model_used = True
-                    except Exception:
-                        pass
+                    self._code_model_used = True
             except Exception:
                 pass
+            # Do NOT append any non-tool messages here to avoid violating tool_call ordering
             screenshot_path = None
             dom_path = None
             if self._logger:
@@ -597,7 +598,202 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             }
         return {"status": "success"}
 
+    def _write_text_file_local(self, name: str, content: str) -> str:
+        try:
+            base_dir = os.path.join(os.getcwd(), "exports")
+            os.makedirs(base_dir, exist_ok=True)
+            fname = os.path.basename(name or "output.txt")
+            target = os.path.join(base_dir, fname)
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(content or "")
+            return target
+        except Exception:
+            return ""
+
+    def _respond_to_pending_tool_calls(self) -> bool:
+        try:
+            for idx in range(len(self._messages) - 1, -1, -1):
+                msg = self._messages[idx]
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") != "assistant":
+                    continue
+                tool_calls = msg.get("tool_calls") or []
+                if not tool_calls:
+                    continue
+                for tc in tool_calls:
+                    tc_id = tc.get("id")
+                    has_response = False
+                    for j in range(idx + 1, len(self._messages)):
+                        m2 = self._messages[j]
+                        if isinstance(m2, dict) and m2.get("role") == "tool" and m2.get("tool_call_id") == tc_id:
+                            has_response = True
+                            break
+                    if has_response:
+                        continue
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "")
+                    arguments = fn.get("arguments", "{}")
+                    tool_call_obj = type("obj", (object,), {
+                        "id": tc_id,
+                        "function": type("obj", (object,), {
+                            "name": name,
+                            "arguments": arguments
+                        })
+                    })
+                    result = self.handle_tool_call(tool_call_obj)
+                    content_dict = {k: v for k, v in result.items() if k != "screenshot_base64"}
+                    self._messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps(content_dict)
+                    })
+            return True
+        except Exception:
+            return False
+    def _maybe_export_text(self, state: EnvState):
+        if self._export_done:
+            return
+        q = (self._query or "").lower()
+        need_export = ("导出" in q) or ("txt" in q) or ("保存" in q) or ("csv" in q) or ("markdown" in q) or ("md" in q)
+        if not need_export:
+            return
+        try:
+            fmt = "txt"
+            if "csv" in q:
+                fmt = "csv"
+            elif "markdown" in q or "md" in q:
+                fmt = "md"
+            items = []
+            try:
+                items = self._browser_computer.get_search_items()
+            except Exception:
+                items = []
+            content = ""
+            fname = "export.txt"
+            if fmt == "csv":
+                fname = "export.csv"
+                for candidate in ["日本旅游路线.csv", "结果.csv", "export.csv"]:
+                    if candidate.replace(".csv", "") in self._query:
+                        fname = candidate
+                        break
+                const_header = "title,url,snippet\n"
+                lines = [const_header]
+                for it in items:
+                    t = (it.get("title") or "").replace('"', '""')
+                    u = (it.get("url") or "").replace('"', '""')
+                    s = (it.get("snippet") or "").replace('"', '""')
+                    lines.append(f'"{t}","{u}","{s}"')
+                if len(lines) <= 1:
+                    txt = self._browser_computer.get_result_text()
+                    content = txt[:200000]
+                else:
+                    content = "\n".join(lines)
+            elif fmt == "md":
+                fname = "export.md"
+                for candidate in ["日本旅游路线.md", "结果.md", "export.md"]:
+                    if candidate.replace(".md", "") in self._query:
+                        fname = candidate
+                        break
+                lines = ["# 日本旅游路线搜索结果", ""]
+                for it in items:
+                    t = it.get("title") or ""
+                    u = it.get("url") or ""
+                    s = it.get("snippet") or ""
+                    lines.push = None
+                    lines.append(f"- [{t}]({u})")
+                    if s:
+                        lines.append(f"  - {s}")
+                if len(lines) <= 2:
+                    txt = self._browser_computer.get_result_text()
+                    content = txt[:200000]
+                else:
+                    content = "\n".join(lines)
+            else:
+                for candidate in ["日本旅游路线.txt", "结果.txt", "export.txt"]:
+                    if candidate.replace(".txt", "") in self._query:
+                        fname = candidate
+                        break
+                txt = self._browser_computer.get_result_text()
+                if not txt or len(txt.strip()) < 200:
+                    self._browser_computer.wait_5_seconds()
+                    txt = self._browser_computer.get_visible_text()
+                if (not txt or len(txt.strip()) < 200) and getattr(state, "dom", None):
+                    txt = state.dom
+                content = txt[:200000]
+            path = self._write_text_file_local(fname, content)
+            if path:
+                self._export_done = True
+                preview_lines = []
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        for i, line in enumerate(f):
+                            if i >= 50:
+                                break
+                            preview_lines.append(line.rstrip("\n"))
+                except Exception:
+                    pass
+            text_content = f"Exported file: {path}\nPreview (first {len(preview_lines)} lines):\n" + "\n".join(preview_lines)
+            self._messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text_content}
+                ]
+            })
+            if sys.stdin.isatty():
+                try:
+                    sysname = platform.system().lower()
+                    if sysname == "darwin":
+                        subprocess.run(["open", path], check=False)
+                    elif sysname.startswith("win"):
+                        os.startfile(path)
+                    else:
+                        subprocess.run(["xdg-open", path], check=False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     def _run_script(self, code: str):
+        def _safe_write_text(path: str, content: str):
+            try:
+                base_dir = os.path.join(os.getcwd(), "exports")
+                os.makedirs(base_dir, exist_ok=True)
+                fname = "output.txt"
+                if isinstance(path, str) and path.strip():
+                    # Map /mnt/data/ to local exports
+                    p = path.strip()
+                    if p.startswith("/mnt/data/"):
+                        p = p[len("/mnt/data/"):]
+                    # Prevent directory traversal
+                    p = os.path.basename(p)
+                    if p:
+                        fname = p
+                target = os.path.join(base_dir, fname)
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(content or "")
+                return target
+            except Exception:
+                return ""
+        def _request_write(path: str, content_preview: str):
+            try:
+                if not isinstance(path, str) or not path.startswith("/mnt/data/"):
+                    return {"status": "rejected", "reason": "Invalid path prefix"}
+                base = os.path.basename(path.strip())
+                if not base:
+                    return {"status": "rejected", "reason": "Invalid filename"}
+                if len(content_preview or "") > 1024 * 1024:
+                    return {"status": "rejected", "reason": "Preview too large"}
+                approved = True
+                if sys.stdin.isatty():
+                    prev = (content_preview or "")[:500]
+                    print("Write preview:\n" + prev)
+                    ans = input(f"Approve write to {path}? (y/n): ").strip().lower()
+                    approved = ans == "y"
+                if not approved:
+                    return {"status": "rejected", "reason": "User rejected"}
+                return {"status": "approved", "approved_path": f"/mnt/data/{base}"}
+            except Exception as e:
+                return {"status": "rejected", "reason": str(e)}
         api = {
             "navigate": lambda url: self._browser_computer.navigate(url),
             "click_at": lambda x, y: self._browser_computer.click_at(self.denormalize_x(x), self.denormalize_y(y)),
@@ -616,6 +812,10 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             "click_selector": lambda selector: self._browser_computer.click_selector(selector),
             "type_selector": lambda selector, text, press_enter=True, clear_before_typing=True: self._browser_computer.type_selector(selector, text, press_enter, clear_before_typing),
             "js_eval_safe": lambda script: self._browser_computer.js_eval_safe(script),
+            "get_visible_text": lambda: self._browser_computer.get_visible_text(),
+            "get_dom_summary": lambda: self._browser_computer.get_dom_summary(),
+            "write_text_file": lambda path, content: _safe_write_text(path, content),
+            "request_write": lambda path, preview: _request_write(path, preview),
         }
         run_sandbox(code, api)
 
@@ -639,6 +839,8 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             "- type_selector(selector, text, press_enter=True, clear_before_typing=True)\n"
             "- js_eval_safe(script)\n"
             "- navigate(url), wait_5_seconds()\n"
+            "- get_visible_text(), get_dom_summary(), write_text_file(path, content)\n"
+            "- request_write(path, content_preview) BEFORE write_text_file\n"
             "Rules:\n"
             "- Do NOT import or use any function not listed.\n"
             "- Decide a proper target site based on the query (e.g., gpt/openai/kimi) and call navigate(url) FIRST.\n"
@@ -646,8 +848,13 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             "- For each candidate: wait_for_selector -> scroll_into_view -> focus_selector -> type_selector.\n"
             "- After submit, wait for a likely answer container (e.g. selectors containing message/chat/result/article). If no change, try next candidate. Max retries 2.\n"
             "- Do NOT use coordinates.\n"
+            "Local Context:\n"
+            f"- OS: {platform.system()}\n"
+            f"- Project Root: {os.getcwd()}\n"
+            f"- Export Dir: {os.path.join(os.getcwd(), 'exports')}\n"
+            "- WRITE POLICY: Use request_write('/mnt/data/<name>.txt', preview) first; only on APPROVED use write_text_file.\n"
         )
-        user_prompt = f"URL: {state.url}\nInteractables: {json.dumps(interactables, ensure_ascii=False)}\nDOM: {dom_summary}\nGoal: input the user's query into the site's chat input and submit.\nQuery: {self._query}"
+        user_prompt = f"URL: {state.url}\nInteractables: {json.dumps(interactables, ensure_ascii=False)}\nDOM: {dom_summary}\nGoal: input the user's query into the site's chat input and submit, and export a TXT if requested.\nQuery: {self._query}"
         prompt = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_prompt},
@@ -659,38 +866,12 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
         code = completion.choices[0].message.content or ""
         try:
             import re
-            m = re.search(r"```python\\n([\\s\\S]*?)```", code)
+            m = re.search(r"```python\n([\s\S]*?)```", code)
             if m:
                 code = m.group(1)
         except Exception:
             pass
         self._run_script(code)
-        try:
-            st = self._browser_computer.current_state()
-            elements = []
-            if hasattr(st, "interactables") and st.interactables:
-                for el in st.interactables[:50]:
-                    norm_x = int(el['x'] / self._browser_computer.screen_size()[0] * 1000)
-                    norm_y = int(el['y'] / self._browser_computer.screen_size()[1] * 1000)
-                    if el.get('label'):
-                        elements.append(f"{el['label']} ({el['tag']}) at ({norm_x}, {norm_y})")
-            text_content = f"Action completed. Current browser state (URL: {st.url})"
-            if elements:
-                text_content += "\nDetected Interactive Elements:\n" + "\n".join(elements)
-            self._messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": text_content},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{base64.b64encode(st.screenshot).decode('utf-8')}"
-                        }
-                    }
-                ]
-            })
-        except Exception:
-            pass
 
     def agent_loop(self):
         # Initial step: Open browser if not already open (though user might prompt it)
@@ -702,6 +883,8 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             if self._verbose:
                 with console.status("Waiting for model response...", spinner="dots"):
                     try:
+                        # Before requesting next turn, ensure pending tool_calls have tool responses
+                        self._respond_to_pending_tool_calls()
                         response = self._client.chat.completions.create(
                             model=self._model_name,
                             messages=self._messages,
@@ -716,6 +899,20 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                                 self._dev_logger.log_debug(error="API Error", exception=msg, stack="", attempts=[], env={"region": self._region, "model": self._model_name})
                             except Exception:
                                 pass
+                        if "tool_calls" in msg and "must be followed by tool messages" in msg:
+                            # Try to append missing tool messages and retry once
+                            if self._respond_to_pending_tool_calls():
+                                try:
+                                    response = self._client.chat.completions.create(
+                                        model=self._model_name,
+                                        messages=self._messages,
+                                        tools=TOOLS_SCHEMA,
+                                        tool_choice="auto"
+                                    )
+                                except Exception:
+                                    self._messages = self._messages[:2]
+                            else:
+                                self._messages = self._messages[:2]
                         fallback_candidates = ["qwen3-max", "qwen-vl-max", "qwen3-coder-plus"]
                         for cand in fallback_candidates:
                             if cand == self._model_name:
@@ -742,33 +939,12 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                 self._consecutive_text_responses = 0
                 for tool_call in message.tool_calls:
                     result = self.handle_tool_call(tool_call)
-                    
-                    # Tool output content (JSON without image)
                     content_dict = {k: v for k, v in result.items() if k != "screenshot_base64"}
                     self._messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": json.dumps(content_dict)
                     })
-                    
-                    # If we have a screenshot, append it as a new User message to show the state
-                    if "screenshot_base64" in result:
-                        text_content = f"Action completed. Current browser state (URL: {result.get('url')})"
-                        if result.get("interactables"):
-                            text_content += "\n" + result.get("interactables")
-
-                        self._messages.append({
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": text_content},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{result['screenshot_base64']}"
-                                    }
-                                }
-                            ]
-                        })
             else:
                 # No tool calls, just text response
                 content = message.content or ""
@@ -785,6 +961,12 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                         )
                     except Exception:
                         pass
+                # Attempt local export when assistant emits text (safe: no pending tool_calls)
+                try:
+                    st = self._browser_computer.current_state()
+                    self._maybe_export_text(st)
+                except Exception:
+                    pass
                 
                 # Check for explicit completion signal
                 if "TASK_COMPLETED:" in content:

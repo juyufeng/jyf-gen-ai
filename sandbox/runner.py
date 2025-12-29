@@ -17,7 +17,10 @@ SAFE_NAMES = {
     "focus_selector",
     "click_selector",
     "type_selector",
-    "js_eval_safe"
+    "js_eval_safe",
+    "get_visible_text",
+    "get_dom_summary",
+    "write_text_file"
 }
 
 def _validate(code: str) -> None:

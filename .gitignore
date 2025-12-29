@@ -10,6 +10,7 @@ __pycache__/
 .trae
 juyufeng.py
 log.txt
+exports/
 
 # Distribution / packaging
 .Python
@@ -181,4 +182,3 @@ cython_debug/
 # Node stuff
 node_modules/
 
-logs/
