@@ -22,8 +22,7 @@
 **克隆仓库**
 
 ```bash
-git clone https://github.com/your-username/computer-use-qwen.git
-cd computer-use-qwen
+git clone https://github.com/juyufeng/jyf-gen-ai.git
 ```
 
 **配置 Python 环境并安装依赖**
