@@ -295,8 +295,8 @@ class QwenAgent:
         base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1" if self._region == "beijing" else "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         chosen = select_model(self._query, self._region, allow_vision=True, allow_code=True, force_model=self._force_model) or self._model_name
         self._model_name = chosen
-        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=15)
-        self._code_client = OpenAI(api_key=api_key, base_url=base_url, timeout=15)
+        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=30)
+        self._code_client = OpenAI(api_key=api_key, base_url=base_url, timeout=30)
         self._code_model = "qwen3-coder-plus"
         self._code_model_used = False
         self._last_screenshot_hash = ""
@@ -651,6 +651,67 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             return True
         except Exception:
             return False
+    def _optimize_exported_file(self, file_path: str) -> Optional[str]:
+        if not file_path or not os.path.exists(file_path):
+            return None
+            
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            
+            if len(content) < 50:
+                return None
+
+            termcolor.cprint(f"Optimizing exported file: {file_path}...", "cyan")
+            
+            sys_prompt = """You are a professional text editor and content optimizer.
+Your task is to rewrite the provided text to be structurally clear, logically coherent, and easy for humans to read.
+
+Strict Requirements:
+1. Processing:
+   - Normalize paragraph structures.
+   - Standardize date and time formats.
+   - Fix typos and grammatical errors.
+   - Enhance the professionalism and readability of descriptions (especially for travel/scenic spots).
+   - Ensure logical consistency (e.g., route arrangements).
+
+2. Output Format:
+   - Use standard Chinese punctuation.
+   - Maintain consistent header hierarchy (H1, H2, H3).
+   - Use bullet points and numbering reasonably.
+   - Add appropriate paragraph breaks and empty lines for readability.
+
+3. Quality Assurance:
+   - PRESERVE all original information.
+   - DO NOT add fictional content.
+   - Ensure consistency before and after optimization.
+"""
+            user_prompt = f"Original Content:\n\n{content}\n\nPlease optimize this text according to the rules."
+            
+            response = self._client.chat.completions.create(
+                model="qwen-plus",
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                timeout=90
+            )
+            
+            optimized_content = response.choices[0].message.content
+            
+            base, ext = os.path.splitext(file_path)
+            new_path = f"{base}.optimized.md"
+            
+            with open(new_path, "w", encoding="utf-8") as f:
+                f.write(optimized_content)
+                
+            termcolor.cprint(f"Optimization complete. Saved to: {new_path}", "green")
+            return new_path
+            
+        except Exception as e:
+            termcolor.cprint(f"Optimization failed: {e}", "red")
+            return None
+
     def _maybe_export_text(self, state: EnvState):
         if self._export_done:
             return
@@ -700,7 +761,6 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                     t = it.get("title") or ""
                     u = it.get("url") or ""
                     s = it.get("snippet") or ""
-                    lines.push = None
                     lines.append(f"- [{t}]({u})")
                     if s:
                         lines.append(f"  - {s}")
@@ -722,18 +782,30 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
                     txt = state.dom
                 content = txt[:200000]
             path = self._write_text_file_local(fname, content)
+            
+            final_path = path
             if path:
                 self._export_done = True
+                # Trigger optimization
+                opt_path = self._optimize_exported_file(path)
+                if opt_path:
+                    final_path = opt_path
+
                 preview_lines = []
                 try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(final_path, "r", encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f):
                             if i >= 50:
                                 break
                             preview_lines.append(line.rstrip("\n"))
                 except Exception:
                     pass
-            text_content = f"Exported file: {path}\nPreview (first {len(preview_lines)} lines):\n" + "\n".join(preview_lines)
+            
+            text_content = f"Exported file: {path}\n"
+            if final_path != path:
+                text_content += f"Optimized file: {final_path}\n"
+            text_content += f"Preview (first {len(preview_lines)} lines):\n" + "\n".join(preview_lines)
+            
             self._messages.append({
                 "role": "user",
                 "content": [
@@ -743,12 +815,13 @@ Preference: If the user query mentions a specific brand/site (e.g., gpt/openai/k
             if sys.stdin.isatty():
                 try:
                     sysname = platform.system().lower()
+                    target_to_open = final_path if final_path else path
                     if sysname == "darwin":
-                        subprocess.run(["open", path], check=False)
+                        subprocess.run(["open", target_to_open], check=False)
                     elif sysname.startswith("win"):
-                        os.startfile(path)
+                        os.startfile(target_to_open)
                     else:
-                        subprocess.run(["xdg-open", path], check=False)
+                        subprocess.run(["xdg-open", target_to_open], check=False)
                 except Exception:
                     pass
         except Exception:
