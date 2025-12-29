@@ -13,7 +13,7 @@
 # limitations under the License.
 import abc
 import pydantic
-from typing import Literal
+from typing import Literal, Optional
 
 
 class EnvState(pydantic.BaseModel):
@@ -21,6 +21,7 @@ class EnvState(pydantic.BaseModel):
     screenshot: bytes
     url: str
     interactables: list[dict] = [] # List of clickable elements with coordinates and labels
+    dom: Optional[str] = None
 
 
 class Computer(abc.ABC):

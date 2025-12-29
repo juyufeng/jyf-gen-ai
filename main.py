@@ -13,6 +13,10 @@
 # limitations under the License.
 import argparse
 import os
+import sys
+from app_logging.context_logger import ContextLogger
+from app_logging.dev_context_logger import DevContextLogger
+from models.selector import select_model
 
 from agent import BrowserAgent
 from agent_qwen import QwenAgent
@@ -63,6 +67,55 @@ def main() -> int:
         help="The AI provider to use.",
     )
     parser.add_argument(
+        "--region",
+        type=str,
+        choices=("beijing", "singapore"),
+        default="beijing",
+        help="DashScope region.",
+    )
+    parser.add_argument(
+        "--log_dir",
+        type=str,
+        default="./logs/context",
+        help="Directory to store context logs.",
+    )
+    parser.add_argument(
+        "--force_model",
+        type=str,
+        default=None,
+        help="Force a specific provider model id.",
+    )
+    parser.add_argument(
+        "--allow_script",
+        action="store_true",
+        default=False,
+        help="Allow sandbox script execution tool.",
+    )
+    parser.add_argument(
+        "--dev_log_dir",
+        type=str,
+        default="./logs/dev",
+        help="Directory to store programming-assistant logs.",
+    )
+    parser.add_argument(
+        "--module",
+        type=str,
+        default="default",
+        help="Current development module for dev logs.",
+    )
+    parser.add_argument(
+        "--session_label",
+        type=str,
+        default="",
+        help="Session label for dev logs.",
+    )
+    parser.add_argument(
+        "--strict_redaction",
+        action="store_true",
+        default=True,
+        help="Enable strict redaction in dev logs.",
+    )
+    parser.add_argument(
         "--api_key",
         type=str,
         default=None,
@@ -70,11 +123,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.api_key:
+    api_key = args.api_key
+    if isinstance(api_key, str) and api_key:
         if args.provider == "qwen":
-            os.environ["DASHSCOPE_API_KEY"] = args.api_key
+            os.environ["DASHSCOPE_API_KEY"] = api_key
         else:
-            os.environ["GEMINI_API_KEY"] = args.api_key
+            os.environ["GEMINI_API_KEY"] = api_key
 
     if args.env == "playwright":
         env = PlaywrightComputer(
@@ -91,11 +145,28 @@ def main() -> int:
         raise ValueError("Unknown environment: ", args.env)
 
     with env as browser_computer:
+        log_dir = args.log_dir if isinstance(args.log_dir, str) and args.log_dir else "./logs/context"
+        logger = ContextLogger(log_dir)
+        dev_log_dir = args.dev_log_dir if isinstance(args.dev_log_dir, str) and args.dev_log_dir else "./logs/dev"
+        module_name = args.module if isinstance(args.module, str) else "default"
+        session_label = args.session_label if isinstance(args.session_label, str) else ""
+        strict_redaction = bool(args.strict_redaction)
+        dev_logger = DevContextLogger(base_dir=dev_log_dir, module=module_name, session_label=session_label, strict_redaction=strict_redaction)
+        dev_logger.log_context(
+            module_desc=f"Module: {args.module}",
+            business_logic="",
+            architecture_notes="",
+            external_services=[{"name": "DashScope", "purpose": "LLM", "doc_url": "https://help.aliyun.com/zh/model-studio/models", "version": ""}],
+        )
         if args.provider == "qwen":
             agent = QwenAgent(
                 browser_computer=browser_computer,
                 query=args.query,
                 model_name=args.model if args.model != 'gemini-2.5-computer-use-preview-10-2025' else 'qwen-vl-max',
+                logger=logger,
+                region=args.region,
+                force_model=args.force_model,
+                dev_logger=dev_logger,
             )
         else:
             agent = BrowserAgent(
@@ -106,7 +177,8 @@ def main() -> int:
         agent.agent_loop()
         
         print("\nSession finished. The browser is still open for your review.")
-        input("Press Enter to close the browser and exit...")
+        if sys.stdin.isatty():
+            input("Press Enter to close the browser and exit...")
     return 0
 
 

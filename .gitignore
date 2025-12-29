@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+提示词.md
+.trae
+juyufeng.py
+log.txt
+
 # Distribution / packaging
 .Python
 build/
@@ -175,3 +180,5 @@ cython_debug/
 
 # Node stuff
 node_modules/
+
+logs/

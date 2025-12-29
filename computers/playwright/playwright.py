@@ -208,10 +208,13 @@ class PlaywrightComputer(Computer):
     def scroll_document(
         self, direction: Literal["up", "down", "left", "right"]
     ) -> EnvState:
-        if direction == "down":
-            return self.key_combination(["PageDown"])
-        elif direction == "up":
-            return self.key_combination(["PageUp"])
+        if direction in ("down", "up"):
+            vertical_scroll_amount = self.screen_size()[1] // 2
+            if direction == "up":
+                vertical_scroll_amount = -vertical_scroll_amount
+            self._page.evaluate(f"window.scrollBy(0, {vertical_scroll_amount});")
+            self._page.wait_for_load_state()
+            return self.current_state()
         elif direction in ("left", "right"):
             return self._horizontal_document_scroll(direction)
         else:
@@ -264,7 +267,10 @@ class PlaywrightComputer(Computer):
         return self.navigate(self._search_engine_url)
 
     def navigate(self, url: str) -> EnvState:
-        normalized_url = url
+        normalized_url = (url or "").strip()
+        if len(normalized_url) >= 2 and normalized_url.startswith("`") and normalized_url.endswith("`"):
+            normalized_url = normalized_url[1:-1]
+        normalized_url = normalized_url.strip().strip("`").strip()
         if not normalized_url.startswith(("http://", "https://")):
             normalized_url = "https://" + normalized_url
         self._page.goto(normalized_url)
@@ -300,29 +306,109 @@ class PlaywrightComputer(Computer):
         self._page.mouse.up()
         return self.current_state()
 
+    def wait_for_selector(self, selector: str, timeout_ms: int = 5000) -> EnvState:
+        self._page.wait_for_selector(selector, timeout=timeout_ms)
+        return self.current_state()
+
+    def element_exists(self, selector: str) -> bool:
+        try:
+            handle = self._page.query_selector(selector)
+            return handle is not None
+        except Exception:
+            return False
+
+    def scroll_into_view(self, selector: str) -> EnvState:
+        handle = self._page.query_selector(selector)
+        if handle:
+            handle.scroll_into_view_if_needed()
+        self._page.wait_for_load_state()
+        return self.current_state()
+
+    def focus_selector(self, selector: str) -> EnvState:
+        self._page.focus(selector)
+        self._page.wait_for_load_state()
+        return self.current_state()
+
+    def click_selector(self, selector: str) -> EnvState:
+        self._page.click(selector)
+        self._page.wait_for_load_state()
+        return self.current_state()
+
+    def type_selector(
+        self,
+        selector: str,
+        text: str,
+        press_enter: bool = True,
+        clear_before_typing: bool = True,
+    ) -> EnvState:
+        handle = self._page.query_selector(selector)
+        if handle:
+            handle.scroll_into_view_if_needed()
+            self._page.wait_for_load_state()
+            self._page.click(selector)
+            self._page.wait_for_load_state()
+            if clear_before_typing:
+                if sys.platform == "darwin":
+                    self.key_combination(["Command", "A"])
+                else:
+                    self.key_combination(["Control", "A"])
+                self.key_combination(["Delete"])
+            self._page.keyboard.type(text)
+            self._page.wait_for_load_state()
+            if press_enter:
+                self.key_combination(["Enter"])
+            self._page.wait_for_load_state()
+        return self.current_state()
+
+    def js_eval_safe(self, script: str) -> EnvState:
+        if not isinstance(script, str) or len(script) > 2000:
+            return self.current_state()
+        try:
+            self._page.evaluate(script)
+        except Exception:
+            pass
+        self._page.wait_for_load_state()
+        return self.current_state()
+
     def current_state(self) -> EnvState:
         self._page.wait_for_load_state()
         # Even if Playwright reports the page as loaded, it may not be so.
         # Add a manual sleep to make sure the page has finished rendering.
         time.sleep(2.0) # Increased wait time
         
-        # Inject Javascript to get clickable elements and their coordinates
-        # This helps the agent "see" the DOM structure
+        # Inject Javascript to get interactive elements with attributes
         try:
             js_script = """
             () => {
-                const elements = document.querySelectorAll('input, button, a, [role="button"], select, textarea');
+                const elements = document.querySelectorAll('input, button, a, [role="button"], select, textarea, [contenteditable="true"]');
                 const interactables = [];
                 elements.forEach(el => {
                     const rect = el.getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden') {
                         let label = el.innerText || el.placeholder || el.getAttribute('aria-label') || el.name || el.id || '';
                         if (label.length > 50) label = label.substring(0, 50) + '...';
+                        let role = el.getAttribute('role') || '';
+                        let type = (el.tagName.toLowerCase() === 'input' && el.type) ? el.type : '';
+                        let accessible = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+                        if (!accessible && el.id) {
+                            const lab = document.querySelector(`label[for="${el.id}"]`);
+                            if (lab) accessible = lab.innerText || '';
+                        }
                         interactables.push({
                             tag: el.tagName.toLowerCase(),
                             x: Math.round(rect.x + rect.width / 2),
                             y: Math.round(rect.y + rect.height / 2),
-                            label: label.replace(/\\s+/g, ' ').trim()
+                            label: label.replace(/\\s+/g, ' ').trim(),
+                            id: el.id || '',
+                            name: el.name || '',
+                            cls: el.className || '',
+                            placeholder: el.placeholder || '',
+                            aria: el.getAttribute('aria-label') || '',
+                            contenteditable: el.getAttribute('contenteditable') === 'true',
+                            role: role,
+                            type: type,
+                            accessible_name: (accessible || '').trim(),
+                            visible: true
                         });
                     }
                 });
@@ -330,14 +416,74 @@ class PlaywrightComputer(Computer):
             }
             """
             interactables = self._page.evaluate(js_script)
-            # Log interactables for debugging (optional, can be removed)
-            # print(f"Found {len(interactables)} interactable elements")
         except Exception as e:
-            # print(f"Error getting interactables: {e}")
             interactables = []
 
+        try:
+            frame_data = []
+            for f in self._page.frames:
+                try:
+                    data = f.evaluate("""
+                    () => {
+                        const elements = document.querySelectorAll('input, textarea, [contenteditable="true"]');
+                        const items = [];
+                        elements.forEach(el => {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden') {
+                                let role = el.getAttribute('role') || '';
+                                let type = (el.tagName.toLowerCase() === 'input' && el.type) ? el.type : '';
+                                let placeholder = el.placeholder || '';
+                                let aria = el.getAttribute('aria-label') || '';
+                                items.push({
+                                    tag: el.tagName.toLowerCase(),
+                                    role, type, placeholder, aria
+                                });
+                            }
+                        });
+                        return items;
+                    }
+                    """)
+                    for item in data:
+                        item["frame_url"] = f.url
+                        interactables.append(item)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Build simple CSS selectors from attributes
+        enhanced = []
+        for it in interactables:
+            tag = it.get("tag") or "div"
+            _id = it.get("id") or ""
+            name = it.get("name") or ""
+            aria = it.get("aria") or ""
+            placeholder = it.get("placeholder") or ""
+            cls = it.get("cls") or ""
+            selector = tag
+            if _id:
+                selector = f"#{_id}"
+            elif name:
+                selector = f"{tag}[name=\"{name}\"]"
+            elif aria:
+                selector = f"{tag}[aria-label=\"{aria}\"]"
+            elif placeholder:
+                selector = f"{tag}[placeholder=\"{placeholder}\"]"
+            elif cls:
+                try:
+                    first = str(cls).split(" ")[0]
+                    if first:
+                        selector = f"{tag}.{first}"
+                except Exception:
+                    selector = tag
+            it["selector"] = selector
+            enhanced.append(it)
+
         screenshot_bytes = self._page.screenshot(type="png", full_page=False)
-        return EnvState(screenshot=screenshot_bytes, url=self._page.url, interactables=interactables)
+        try:
+            dom_html = self._page.content()
+        except Exception:
+            dom_html = None
+        return EnvState(screenshot=screenshot_bytes, url=self._page.url, interactables=enhanced, dom=dom_html)
 
     def screen_size(self) -> tuple[int, int]:
         viewport_size = self._page.viewport_size

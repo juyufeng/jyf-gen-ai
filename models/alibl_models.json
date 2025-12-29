@@ -1,0 +1,11 @@
+{
+  "text": [
+    { "id": "qwen3-max", "name": "Qwen3 Max", "regions": ["beijing", "singapore"], "priority": 100 }
+  ],
+  "vision": [
+    { "id": "qwen-vl-max", "name": "Qwen VL Max", "regions": ["beijing", "singapore"], "priority": 100 }
+  ],
+  "code": [
+    { "id": "qwen3-coder-plus", "name": "Qwen3 Coder Plus", "regions": ["beijing", "singapore"], "priority": 100 }
+  ]
+}
