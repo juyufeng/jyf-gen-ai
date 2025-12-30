@@ -101,7 +101,9 @@ class PlaywrightComputer(Computer):
     def __enter__(self):
         print("Creating session...")
         self._playwright = sync_playwright().start()
+        # Use Google Chrome to support proprietary codecs (H.264, AAC) and solve "HTML5 player not supported" errors.
         self._browser = self._playwright.chromium.launch(
+            channel="chrome",
             args=[
                 "--disable-extensions",
                 "--disable-file-system",
